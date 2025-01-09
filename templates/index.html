@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Earth Model + Popup</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+    }
+    /* Stile del popup: nascosto di default, in primo piano */
+    #popup {
+      display: none;
+      position: absolute; 
+      top: 50px; 
+      left: 50px;
+      width: 300px;
+      padding: 20px;
+      background: #fff;
+      border: 2px solid #ccc;
+      z-index: 9999; /* assicuriamoci sia sopra il canvas */
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Div che conterrà il form per l'upload -->
+  <div id="popup">
+    <h3>Carica foto per la posizione:</h3>
+    <p id="coords"></p>
+    <input type="file" id="fileInput" accept="image/*" />
+    <button id="saveBtn">Salva</button>
+    <button id="cancelBtn">Annulla</button>
+  </div>
+
+  <!-- Importa Three.js e OrbitControls -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+
+  <!-- Script con la logica 3D e la gestione del popup -->
+  <script>
+    // === Creiamo la scena e il renderer ===
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Controlli orbitali
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Aggiunta luci
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(10,10,10);
+    scene.add(dirLight);
+
+    const ambLight = new THREE.AmbientLight(0x555555);
+    scene.add(ambLight);
+
+    // Creiamo la Terra
+    const textureLoader = new THREE.TextureLoader();
+    const earthTexture = textureLoader.load('/static/textures/8081_earthmap10k.jpg');
+    const bumpTexture = textureLoader.load('/static/textures/bump.jpg');
+    const earthGeo = new THREE.SphereGeometry(5,32,32);
+    const earthMat = new THREE.MeshPhongMaterial({
+      map: earthTexture,
+      bumpMap: bumpTexture,
+      bumpScale: 0.05
+    });
+    const earth = new THREE.Mesh(earthGeo, earthMat);
+    scene.add(earth);
+
+    // Nuvole
+    const cloudTexture = textureLoader.load('/static/textures/earthcloudmap.jpg');
+    const cloudGeo = new THREE.SphereGeometry(5.03,32,32);
+    const cloudMat = new THREE.MeshLambertMaterial({
+      map: cloudTexture,
+      transparent: true,
+      opacity: 0.3
+    });
+    const clouds = new THREE.Mesh(cloudGeo, cloudMat);
+    scene.add(clouds);
+
+    // Stelle
+    const starsGeo = new THREE.BufferGeometry();
+    const starVertices = [];
+    for (let i = 0; i < 1000; i++) {
+      let x = (Math.random() - 0.5) * 1000;
+      let y = (Math.random() - 0.5) * 1000;
+      let z = (Math.random() - 0.5) * 1000;
+      starVertices.push(x,y,z);
+    }
+    starsGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVertices,3));
+    const starsMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1 });
+    const starField = new THREE.Points(starsGeo, starsMat);
+    scene.add(starField);
+
+    camera.position.z = 15;
+
+    // Raycaster per il click
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    // Evento click sullo schermo
+    window.addEventListener('click', (event) => {
+      event.preventDefault();
+
+      mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+      mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      // Intersechiamo la Terra
+      const intersects = raycaster.intersectObject(earth);
+      if(intersects.length > 0) {
+        // Punto di intersezione
+        const point = intersects[0].point;
+        const { lat, lon } = cartesianToLatLon(point);
+
+        console.log("Hai cliccato: lat=", lat, " lon=", lon);
+
+        // Apri popup
+        openPopup(lat, lon);
+      }
+    });
+
+    // Funzione di conversione 3D -> lat/lon
+    function cartesianToLatLon(pos) {
+      const radius = pos.length();
+      const phi = Math.acos(pos.y / radius);  // 0..pi
+      const theta = Math.atan2(pos.x, pos.z); // -pi..pi
+
+      const lat = 90 - (phi * 180/Math.PI);
+      let lon = (theta * 180/Math.PI);
+      lon = (lon + 360) % 360;
+      return { lat, lon };
+    }
+
+    // Animazione
+    function animate() {
+      requestAnimationFrame(animate);
+
+      earth.rotation.y += 0.0005;
+      clouds.rotation.y += 0.0006;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // === GESTIONE POPUP ===
+    const popup = document.getElementById('popup');
+    const coordsEl = document.getElementById('coords');
+    const fileInput = document.getElementById('fileInput');
+    const saveBtn = document.getElementById('saveBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    // Apri popup
+    function openPopup(lat, lon) {
+      coordsEl.textContent = `Lat: ${lat.toFixed(2)} / Lon: ${lon.toFixed(2)}`;
+      popup.style.display = "block";
+
+      // Salva i valori in attributi data, se vuoi
+      popup.dataset.lat = lat;
+      popup.dataset.lon = lon;
+    }
+
+    // Salva
+    saveBtn.onclick = () => {
+      const lat = parseFloat(popup.dataset.lat);
+      const lon = parseFloat(popup.dataset.lon);
+
+      const file = fileInput.files[0];
+      if(!file) {
+        alert("Seleziona un'immagine prima di salvare!");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64Img = e.target.result;
+        // Esempio: salva in localStorage
+        savePoint(lat, lon, base64Img);
+
+        // Chiudi popup
+        popup.style.display = "none";
+        fileInput.value = "";
+      };
+      reader.readAsDataURL(file);
+    };
+
+    // Annulla
+    cancelBtn.onclick = () => {
+      popup.style.display = "none";
+      fileInput.value = "";
+    };
+
+    // Esempio di funzione che salva dati in localStorage
+    function savePoint(lat, lon, base64) {
+      let points = JSON.parse(localStorage.getItem('earthPoints')) || [];
+      points.push({ lat, lon, img: base64 });
+      localStorage.setItem('earthPoints', JSON.stringify(points));
+
+      // Qui potresti creare un marker sulla mappa
+      addMarker(lat, lon);
+    }
+
+    // Creiamo i marker esistenti da localStorage
+    initMarkers();
+    function initMarkers() {
+      let points = JSON.parse(localStorage.getItem('earthPoints')) || [];
+      points.forEach(({ lat, lon }) => {
+        addMarker(lat, lon);
+      });
+    }
+
+    function addMarker(lat, lon) {
+      const markerPos = latLonToCartesian(lat, lon, 5); 
+      const markerGeo = new THREE.SphereGeometry(0.1, 8, 8);
+      const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+      const marker = new THREE.Mesh(markerGeo, markerMat);
+      marker.position.copy(markerPos);
+      scene.add(marker);
+    }
+
+    // lat/lon -> cartesian
+    function latLonToCartesian(lat, lon, radius=5) {
+      const phi = (90 - lat) * (Math.PI/180);
+      const theta = (lon + 180) * (Math.PI/180);
+
+      const x = radius * Math.sin(phi) * Math.cos(theta);
+      const y = radius * Math.cos(phi);
+      const z = radius * Math.sin(phi) * Math.sin(theta);
+      return new THREE.Vector3(x, y, z);
+    }
+  </script>
+</body>
+</html>

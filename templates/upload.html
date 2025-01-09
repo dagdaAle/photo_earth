@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Upload foto</title>
+</head>
+<body>
+  <h2>Carica foto per la posizione:</h2>
+  <p>Lat: {{ lat }} / Lon: {{ lon }}</p>
+
+  <input type="file" id="fileInput" accept="image/*" />
+  <button id="saveBtn">Salva</button>
+  <button id="cancelBtn">Annulla</button>
+
+  <!-- Passiamo lat e lon a JavaScript -->
+  <script>
+    let lat;
+    let lon;
+    if (typeof lat === 'undefined') {
+      lat = {{ lat }};
+      lon = {{ lon }};
+    }
+  </script>
+  <!-- Script dedicato all'upload -->
+  <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+</body>
+</html>
